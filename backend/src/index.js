@@ -206,7 +206,7 @@ async function ensureDeliveryTables() {
             await pool.query('INSERT INTO DeliveryRules (min_amount, max_amount, charge) VALUES (?, ?, ?)', [0, 499.99, 50]);
             await pool.query('INSERT INTO DeliveryRules (min_amount, max_amount, charge) VALUES (?, ?, ?)', [500, null, 0]);
             // Default delivery charge setting
-            await pool.query('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)', ['default_delivery_charge', '50']);
+            await pool.query('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?', ['default_delivery_charge', '50', '50']);
             console.log('Seeded default delivery rules');
         }
     } catch (err) {
@@ -292,7 +292,7 @@ app.put('/api/admin/delivery', requireAdminAuth, async (req, res) => {
 
         // Update default charge setting
         if (typeof default_charge !== 'undefined') {
-            await connection.execute('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)', ['default_delivery_charge', String(default_charge)]);
+            await connection.execute('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?', ['default_delivery_charge', String(default_charge), String(default_charge)]);
         }
 
         await connection.commit();

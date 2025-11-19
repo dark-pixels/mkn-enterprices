@@ -1491,7 +1491,7 @@ export default function App() {
           )}
         </div>
         {showDeliveryModal && (
-          <DeliverySettingsModal onClose={() => setShowDeliveryModal(false)} config={adminDeliveryConfig} setConfig={setAdminDeliveryConfig} onSave={() => saveAdminDeliveryConfig(adminDeliveryConfig)} />
+          <DeliverySettingsModal onClose={() => setShowDeliveryModal(false)} config={adminDeliveryConfig} setConfig={setAdminDeliveryConfig} onSave={saveAdminDeliveryConfig} />
         )}
       </div>
     );
