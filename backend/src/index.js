@@ -8,8 +8,10 @@ const os = require('os');
 const path = require('path');
 
 const app = express();
-// Allow configuration via env: FRONTEND_URL controls CORS origin, PORT controls server port.
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Allow configuration via env: FRONTEND_URL or FRONTEND_URLS control CORS origin(s), PORT controls server port.
+// FRONTEND_URLS may be a comma-separated list (e.g. "https://mkn-enterprices.vercel.app,http://localhost:5174").
+const FRONTEND_URL = process.env.FRONTEND_URL || '';
+const FRONTEND_URLS = (process.env.FRONTEND_URLS || FRONTEND_URL || '').split(',').map(s => s.trim()).filter(Boolean);
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001; // The React app will call this port
 
 // Database Configuration: prefer `DATABASE_URL` from `.env` and NEVER hard-code secrets.
@@ -20,7 +22,28 @@ const dbConfig = {
 };
 
 // Middleware
-app.use(cors({ origin: FRONTEND_URL })); // Enables cross-origin requests from the frontend (configurable via FRONTEND_URL)
+// Dynamic CORS origin handling: allow listed origins, and when none configured allow localhost during development.
+const corsOptions = {
+    origin: function(origin, callback) {
+        // allow requests with no origin (e.g. curl, postman)
+        if (!origin) return callback(null, true);
+
+        // If FRONTEND_URLS are provided, allow those.
+        if (FRONTEND_URLS.length > 0) {
+            if (FRONTEND_URLS.includes(origin)) return callback(null, true);
+            // Convenience: if we're running in non-production locally, also allow localhost origins
+            if ((process.env.NODE_ENV || '').toLowerCase() !== 'production' && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'))) return callback(null, true);
+            return callback(new Error('Not allowed by CORS'));
+        }
+
+        // No configured origins: be permissive for localhost origins (local dev), otherwise deny
+        if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) return callback(null, true);
+        return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+    optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions)); // Enables cross-origin requests from configured frontend origins
 app.use(bodyParser.json({ limit: '50mb' })); // Allows parsing of JSON bodies, including large Base64 images
 
 // Serve uploaded screenshots
@@ -96,6 +119,8 @@ async function initializeDatabase() {
         await seedInitialProducts();
         // Ensure screenshot-related columns exist so new code can store BLOBs
         await ensureScreenshotColumns();
+        // Ensure delivery-related tables/columns
+        await ensureDeliveryTables();
         
     } catch (error) {
         console.error('Failed to connect to the database:', error && error.message ? error.message : error);
@@ -142,6 +167,7 @@ async function ensureScreenshotColumns() {
         if (!existing.has('payment_screenshot')) alters.push('ADD COLUMN payment_screenshot LONGBLOB NULL');
         if (!existing.has('payment_screenshot_mime')) alters.push("ADD COLUMN payment_screenshot_mime VARCHAR(100) NULL");
         if (!existing.has('payment_screenshot_status')) alters.push("ADD COLUMN payment_screenshot_status VARCHAR(255) NULL");
+        if (!existing.has('delivery_charge')) alters.push("ADD COLUMN delivery_charge DECIMAL(10,2) NULL");
         if (alters.length > 0) {
             const sql = `ALTER TABLE Orders ${alters.join(', ')}`;
             await pool.query(sql);
@@ -154,8 +180,131 @@ async function ensureScreenshotColumns() {
     }
 }
 
+// Ensure delivery config tables exist (DeliveryRules + Settings)
+async function ensureDeliveryTables() {
+    try {
+        if (!pool) return;
+        // Create Settings table (key-value)
+        const settingsSql = "CREATE TABLE IF NOT EXISTS Settings (`key` VARCHAR(100) PRIMARY KEY, `value` TEXT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+        await pool.query(settingsSql);
+
+        // Create DeliveryRules table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS DeliveryRules (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                min_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+                max_amount DECIMAL(12,2) NULL,
+                charge DECIMAL(10,2) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+
+        // Seed default config if empty
+        const [rows] = await pool.query('SELECT COUNT(*) AS count FROM DeliveryRules');
+        if (rows && rows[0] && rows[0].count === 0) {
+            // Default: below 500 -> 50 charge, 500 and above -> free
+            await pool.query('INSERT INTO DeliveryRules (min_amount, max_amount, charge) VALUES (?, ?, ?)', [0, 499.99, 50]);
+            await pool.query('INSERT INTO DeliveryRules (min_amount, max_amount, charge) VALUES (?, ?, ?)', [500, null, 0]);
+            // Default delivery charge setting
+            await pool.query('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)', ['default_delivery_charge', '50']);
+            console.log('Seeded default delivery rules');
+        }
+    } catch (err) {
+        console.error('Could not ensure delivery tables:', err && err.message ? err.message : err);
+    }
+}
+
+// Fetch delivery config
+async function getDeliveryConfigFromDB() {
+    try {
+        if (!pool) return { tiers: [], default_charge: 0 };
+        const [tiers] = await pool.query('SELECT id, min_amount, max_amount, charge FROM DeliveryRules ORDER BY min_amount ASC');
+        const [srows] = await pool.query("SELECT `value` FROM Settings WHERE `key`='default_delivery_charge'");
+        const default_charge = (srows && srows[0] && srows[0].value) ? parseFloat(srows[0].value) : 0;
+        return { tiers, default_charge };
+    } catch (err) {
+        console.error('Failed to read delivery config:', err);
+        return { tiers: [], default_charge: 0 };
+    }
+}
+
+function computeDeliveryCharge(totalAmount, tiers, defaultCharge) {
+    const total = parseFloat(totalAmount || 0);
+    for (const t of tiers) {
+        const min = parseFloat(t.min_amount || 0);
+        const max = t.max_amount !== null ? parseFloat(t.max_amount) : null;
+        if ((total >= min) && (max === null || total <= max)) {
+            return parseFloat(t.charge || 0);
+        }
+    }
+    return parseFloat(defaultCharge || 0);
+}
+
 
 // --- API Endpoints ---
+
+// GET /api/delivery - public delivery configuration (tiers & default)
+app.get('/api/delivery', async (req, res) => {
+    try {
+        const p = requirePoolOrRespond(res);
+        if (!p) return;
+        const cfg = await getDeliveryConfigFromDB();
+        res.json(cfg);
+    } catch (err) {
+        console.error('Error fetching delivery config:', err);
+        res.status(500).json({ error: 'Failed to fetch delivery configuration' });
+    }
+});
+
+// ADMIN: GET /api/admin/delivery - returns delivery config
+app.get('/api/admin/delivery', requireAdminAuth, async (req, res) => {
+    try {
+        const p = requirePoolOrRespond(res);
+        if (!p) return;
+        const cfg = await getDeliveryConfigFromDB();
+        res.json(cfg);
+    } catch (err) {
+        console.error('Error fetching admin delivery config:', err);
+        res.status(500).json({ error: 'Failed to fetch delivery configuration' });
+    }
+});
+
+// ADMIN: PUT /api/admin/delivery - replace delivery tiers and default charge
+app.put('/api/admin/delivery', requireAdminAuth, async (req, res) => {
+    const { default_charge, tiers } = req.body || {};
+    let connection;
+    try {
+        const p = requirePoolOrRespond(res);
+        if (!p) return;
+        connection = await p.getConnection();
+        await connection.beginTransaction();
+
+        // Replace tiers: simple approach - delete all and re-insert
+        await connection.query('DELETE FROM DeliveryRules');
+        if (Array.isArray(tiers)) {
+            for (const t of tiers) {
+                const min = parseFloat(t.min_amount || 0);
+                const max = (t.max_amount === null || t.max_amount === undefined) ? null : parseFloat(t.max_amount);
+                const charge = parseFloat(t.charge || 0);
+                await connection.execute('INSERT INTO DeliveryRules (min_amount, max_amount, charge) VALUES (?, ?, ?)', [min, max, charge]);
+            }
+        }
+
+        // Update default charge setting
+        if (typeof default_charge !== 'undefined') {
+            await connection.execute('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)', ['default_delivery_charge', String(default_charge)]);
+        }
+
+        await connection.commit();
+        res.json({ ok: true });
+    } catch (err) {
+        if (connection) await connection.rollback();
+        console.error('Failed to update delivery config:', err);
+        res.status(500).json({ error: 'Failed to update delivery configuration' });
+    } finally {
+        if (connection) connection.release();
+    }
+});
 
 // 1. PRODUCTS (CRUD)
 
@@ -279,8 +428,18 @@ app.post('/api/orders', async (req, res) => {
             }
         }
 
-        // 1. Insert into Orders table — include new BLOB and MIME columns (ensure DB has these columns)
-        const orderQuery = `INSERT INTO Orders (order_id, order_date, status, customer_name, customer_address, customer_mobile, customer_upi, payment_screenshot_status, payment_screenshot_mime, payment_screenshot, total_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        // Compute delivery charge server-side using configured tiers/settings
+        let deliveryCharge = 0;
+        try {
+            const cfg = await getDeliveryConfigFromDB();
+            deliveryCharge = computeDeliveryCharge(totalAmount, cfg.tiers || [], cfg.default_charge);
+        } catch (e) {
+            console.warn('Failed to compute delivery charge, defaulting to 0', e);
+            deliveryCharge = 0;
+        }
+
+        // 1. Insert into Orders table — include new BLOB, MIME columns and delivery_charge (ensure DB has these columns)
+        const orderQuery = `INSERT INTO Orders (order_id, order_date, status, customer_name, customer_address, customer_mobile, customer_upi, payment_screenshot_status, payment_screenshot_mime, payment_screenshot, total_amount, delivery_charge) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
         // Debug logging: report if we received a screenshot buffer and its size
         if (screenshotBuffer && screenshotBuffer.length) {
@@ -300,7 +459,8 @@ app.post('/api/orders', async (req, res) => {
             screenshotStatus,
             screenshotMime,
             screenshotBuffer,
-            totalAmount
+            totalAmount,
+            deliveryCharge
         ]);
 
         // 2. Insert into Order_Items table
@@ -312,7 +472,7 @@ app.post('/api/orders', async (req, res) => {
         }
 
         await connection.commit();
-        res.status(201).json({ message: "Order placed successfully", orderId: id });
+        res.status(201).json({ message: "Order placed successfully", orderId: id, deliveryCharge });
 
     } catch (error) {
         if (connection) await connection.rollback();
