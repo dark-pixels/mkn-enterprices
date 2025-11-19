@@ -1,0 +1,29 @@
+# Ignore Node modules everywhere
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+*.env
+**/.env
+
+# Build output
+dist/
+build/
+
+# Uploads and user files
+uploads/
+**/uploads/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/
+.idea/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
