@@ -858,7 +858,8 @@ export default function App() {
       }
       alert('Delivery configuration saved');
       setShowDeliveryModal(false);
-      // refresh public config
+      // update admin state and refresh public config
+      setAdminDeliveryConfig(cfg);
       fetchDeliveryConfig();
     } catch (err) {
       console.error('Error saving admin delivery config', err);
@@ -1514,9 +1515,9 @@ export default function App() {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold">Delivery Settings</h3>
             <div className="flex items-center gap-2">
-              <button onClick={() => { if (onSave) { setConfig(local); onSave(); } }} className="bg-green-600 text-white px-3 py-1 rounded">Save</button>
-              <button onClick={onClose} className="bg-gray-200 px-3 py-1 rounded">Close</button>
-            </div>
+                <button onClick={() => { if (onSave) { onSave(local); } }} className="bg-green-600 text-white px-3 py-1 rounded">Save</button>
+                <button onClick={onClose} className="bg-gray-200 px-3 py-1 rounded">Close</button>
+              </div>
           </div>
 
           <div className="mb-4">
