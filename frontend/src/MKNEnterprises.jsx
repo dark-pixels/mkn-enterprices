@@ -163,7 +163,7 @@ const ProductCard = ({ product, onClick }) => (
 );
 
 // --- CHECKOUT COMPONENT ---
-  const CheckoutPage = ({ items, total, onPlaceOrder, onBack, deliveryCharge }) => {
+  const CheckoutPage = ({ items, total, onPlaceOrder, onBack, deliveryCharge, deliveryConfig = { tiers: [], default_charge: 0 } }) => {
   const [form, setForm] = useState({ name: '', address: '', upi: '', screenshot: null, mobileNumber: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1584,6 +1584,7 @@ export default function App() {
           <CheckoutPage
             items={validCheckoutItems}
             total={checkoutTotal}
+            deliveryConfig={deliveryConfig}
             deliveryCharge={computeDeliveryChargeClient(checkoutTotal, deliveryConfig.tiers, deliveryConfig.default_charge)}
             onPlaceOrder={handlePlaceOrder}
             onBack={() => setView(checkoutSource === 'cart' ? 'cart' : 'product')}
