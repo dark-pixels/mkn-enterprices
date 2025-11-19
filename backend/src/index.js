@@ -7,7 +7,9 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const port = 3001; // The React app will call this port
+// Allow configuration via env: FRONTEND_URL controls CORS origin, PORT controls server port.
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001; // The React app will call this port
 
 // Database Configuration: prefer `DATABASE_URL` from `.env` and NEVER hard-code secrets.
 // Set `DATABASE_URL` in `backend/.env`, for example:
@@ -17,7 +19,7 @@ const dbConfig = {
 };
 
 // Middleware
-app.use(cors()); // Enables cross-origin requests from the frontend
+app.use(cors({ origin: FRONTEND_URL })); // Enables cross-origin requests from the frontend (configurable via FRONTEND_URL)
 app.use(bodyParser.json({ limit: '50mb' })); // Allows parsing of JSON bodies, including large Base64 images
 
 // Serve uploaded screenshots
