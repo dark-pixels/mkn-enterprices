@@ -4,6 +4,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const app = express();
@@ -23,8 +24,29 @@ app.use(cors({ origin: FRONTEND_URL })); // Enables cross-origin requests from t
 app.use(bodyParser.json({ limit: '50mb' })); // Allows parsing of JSON bodies, including large Base64 images
 
 // Serve uploaded screenshots
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+// Use `UPLOADS_DIR` env if set (recommended for persistent storage).
+// In serverless/read-only environments (e.g. AWS Lambda, Vercel) the code will
+// fall back to the OS temp directory so the server doesn't crash when trying
+// to create '/var/task/...'. Note that temp storage is ephemeral and not
+// suitable for long-term storage — use S3/Blob storage in production.
+let uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
+let uploadsAvailable = true;
+try {
+    const isServerless = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL || process.env.K_SERVICE);
+    if (isServerless && !process.env.UPLOADS_DIR) {
+        // Prefer OS temp dir in serverless environments to avoid write failure
+        uploadsDir = path.join(os.tmpdir(), 'mkn-uploads');
+        console.warn('Serverless environment detected — using temporary uploads directory:', uploadsDir);
+    }
+
+    if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+} catch (err) {
+    // If we cannot create the directory (read-only FS), mark uploads unavailable
+    console.warn('Could not create uploads directory', uploadsDir, '-', err && err.message ? err.message : err);
+    uploadsAvailable = false;
+}
 // NOTE: Do not expose uploads statically. We'll serve them via a protected endpoint below.
 
 let pool;
@@ -377,6 +399,7 @@ app.get('/api/orders/:id/screenshot', requireAdminAuth, async (req, res) => {
         const val = row.payment_screenshot_status;
         if (!val) return res.status(404).json({ error: 'No screenshot for this order' });
         if (typeof val === 'string' && val.startsWith('/uploads/')) {
+            if (!uploadsAvailable) return res.status(503).json({ error: 'Screenshot storage unavailable' });
             const filename = val.replace('/uploads/', '');
             const filePath = path.join(uploadsDir, filename);
             if (fs.existsSync(filePath)) return res.sendFile(filePath);
