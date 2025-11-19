@@ -219,9 +219,16 @@ async function getDeliveryConfigFromDB() {
     try {
         if (!pool) return { tiers: [], default_charge: 0 };
         const [tiers] = await pool.query('SELECT id, min_amount, max_amount, charge FROM DeliveryRules ORDER BY min_amount ASC');
-        const [srows] = await pool.query("SELECT `value` FROM Settings WHERE `key`='default_delivery_charge'");
-        const default_charge = (srows && srows[0] && srows[0].value) ? parseFloat(srows[0].value) : 0;
-        return { tiers, default_charge };
+        const [srows] = await pool.query("SELECT `key`,`value` FROM Settings WHERE `key` IN ('default_delivery_charge','delivery_note')");
+        let default_charge = 0;
+        let note = '';
+        if (srows && srows.length) {
+            for (const r of srows) {
+                if (r.key === 'default_delivery_charge') default_charge = (r.value != null) ? parseFloat(r.value) : 0;
+                if (r.key === 'delivery_note') note = r.value || '';
+            }
+        }
+        return { tiers, default_charge, note };
     } catch (err) {
         console.error('Failed to read delivery config:', err);
         return { tiers: [], default_charge: 0 };
@@ -271,7 +278,7 @@ app.get('/api/admin/delivery', requireAdminAuth, async (req, res) => {
 
 // ADMIN: PUT /api/admin/delivery - replace delivery tiers and default charge
 app.put('/api/admin/delivery', requireAdminAuth, async (req, res) => {
-    const { default_charge, tiers } = req.body || {};
+    const { default_charge, tiers, note } = req.body || {};
     let connection;
     try {
         const p = requirePoolOrRespond(res);
@@ -293,6 +300,11 @@ app.put('/api/admin/delivery', requireAdminAuth, async (req, res) => {
         // Update default charge setting
         if (typeof default_charge !== 'undefined') {
             await connection.execute('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?', ['default_delivery_charge', String(default_charge), String(default_charge)]);
+        }
+
+        // Update delivery note (optional)
+        if (typeof note !== 'undefined') {
+            await connection.execute('INSERT INTO Settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?', ['delivery_note', String(note), String(note)]);
         }
 
         await connection.commit();

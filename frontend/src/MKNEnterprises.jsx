@@ -228,6 +228,10 @@ const ProductCard = ({ product, onClick }) => (
             </div>
             {/* Show threshold hint if configured: find the lowest min_amount for free tiers */}
             {(() => {
+              // If admin provided a note, show it; otherwise, fall back to the computed free-delivery hint
+              if (deliveryConfig && deliveryConfig.note && String(deliveryConfig.note).trim().length > 0) {
+                return <div className="text-sm text-gray-500 mt-1">{deliveryConfig.note}</div>;
+              }
               const tiers = deliveryConfig && Array.isArray(deliveryConfig.tiers) ? deliveryConfig.tiers : [];
               const zeroTiers = tiers.filter(t => parseFloat(t.charge || 0) === 0);
               if (zeroTiers.length > 0) {
@@ -546,7 +550,7 @@ export default function App() {
   const [productManagementView, setProductManagementView] = useState('list'); // list, add, edit
   const [productToEdit, setProductToEdit] = useState(null);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
-  const [adminDeliveryConfig, setAdminDeliveryConfig] = useState({ tiers: [], default_charge: 0 });
+  const [adminDeliveryConfig, setAdminDeliveryConfig] = useState({ tiers: [], default_charge: 0, note: '' });
 
 
   // --- API Handlers ---
@@ -556,7 +560,12 @@ export default function App() {
       const resp = await fetch(`${API_URL.replace(/\/api\/?$/, '')}/api/delivery`);
       if (!resp.ok) return;
       const cfg = await resp.json().catch(() => null);
-      if (cfg) setDeliveryConfig(cfg);
+      if (cfg) {
+        cfg.tiers = cfg.tiers || [];
+        cfg.default_charge = typeof cfg.default_charge !== 'undefined' ? cfg.default_charge : 0;
+        cfg.note = cfg.note || '';
+        setDeliveryConfig(cfg);
+      }
     } catch (err) {
       console.warn('Could not fetch delivery config:', err);
     }
@@ -837,6 +846,10 @@ export default function App() {
         return;
       }
       const cfg = await resp.json();
+      // Ensure shape
+      cfg.tiers = cfg.tiers || [];
+      cfg.default_charge = typeof cfg.default_charge !== 'undefined' ? cfg.default_charge : 0;
+      cfg.note = cfg.note || '';
       setAdminDeliveryConfig(cfg);
     } catch (err) {
       console.error('Error fetching admin delivery config', err);
@@ -858,8 +871,10 @@ export default function App() {
       }
       alert('Delivery configuration saved');
       setShowDeliveryModal(false);
-      // update admin state and refresh public config
+      // update admin state and public config immediately
       setAdminDeliveryConfig(cfg);
+      setDeliveryConfig(cfg);
+      // refresh from server to ensure canonical state
       fetchDeliveryConfig();
     } catch (err) {
       console.error('Error saving admin delivery config', err);
@@ -1499,10 +1514,10 @@ export default function App() {
 
   // Delivery Settings Modal Component
   const DeliverySettingsModal = ({ onClose, config, setConfig, onSave }) => {
-    const [local, setLocal] = useState(() => ({ tiers: (config && config.tiers) ? config.tiers.map(t => ({ ...t })) : [], default_charge: config && config.default_charge ? config.default_charge : 0 }));
+    const [local, setLocal] = useState(() => ({ tiers: (config && config.tiers) ? config.tiers.map(t => ({ ...t })) : [], default_charge: config && config.default_charge ? config.default_charge : 0, note: config && config.note ? config.note : '' }));
 
     useEffect(() => {
-      setLocal({ tiers: (config && config.tiers) ? config.tiers.map(t => ({ ...t })) : [], default_charge: config && config.default_charge ? config.default_charge : 0 });
+      setLocal({ tiers: (config && config.tiers) ? config.tiers.map(t => ({ ...t })) : [], default_charge: config && config.default_charge ? config.default_charge : 0, note: config && config.note ? config.note : '' });
     }, [config]);
 
     const addTier = () => setLocal(l => ({ ...l, tiers: [...l.tiers, { min_amount: 0, max_amount: null, charge: 0 }] }));
@@ -1523,6 +1538,11 @@ export default function App() {
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Default Delivery Charge (used when no tier matches)</label>
             <input type="number" value={local.default_charge} onChange={e => setLocal(l => ({ ...l, default_charge: parseFloat(e.target.value || 0) }))} className="p-2 border rounded w-48" />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Note (shown on checkout/success)</label>
+            <textarea value={local.note} onChange={e => setLocal(l => ({ ...l, note: e.target.value }))} className="p-2 border rounded w-full" rows={3} placeholder="e.g. Orders above ₹500 qualify for free delivery" />
           </div>
 
           <div>
