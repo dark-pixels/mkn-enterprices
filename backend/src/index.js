@@ -36,8 +36,18 @@ const corsOptions = {
             return callback(new Error('Not allowed by CORS'));
         }
 
-        // No configured origins: be permissive for localhost origins (local dev), otherwise deny
+        // No configured origins: be permissive for localhost origins (local dev).
         if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) return callback(null, true);
+
+        // If not configured and running on Vercel, allow common Vercel frontend origins so deployed frontend can reach this backend.
+        // This permits origins like `https://<project>.vercel.app`. Be explicit about allowing the main frontend too.
+        try {
+            const lower = origin.toLowerCase();
+            if (lower === 'https://mkn-enterprices.vercel.app' || lower.endsWith('.vercel.app')) return callback(null, true);
+        } catch (e) {
+            // fallthrough to deny
+        }
+
         return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
