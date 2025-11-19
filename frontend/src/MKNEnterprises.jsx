@@ -23,6 +23,18 @@ import {
 // Read the backend API URL from Vite env. Set `VITE_API_URL` to e.g. "https://mkn-enterprices-bk.vercel.app/api"
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+// Client-side helper to compute delivery charge using the same tier logic as the backend
+function computeDeliveryChargeClient(totalAmount, tiers = [], defaultCharge = 0) {
+  const total = parseFloat(totalAmount || 0);
+  if (!Array.isArray(tiers) || tiers.length === 0) return parseFloat(defaultCharge || 0);
+  for (const t of tiers) {
+    const min = parseFloat(t.min_amount || 0);
+    const max = t.max_amount === null || t.max_amount === undefined ? null : parseFloat(t.max_amount);
+    if ((total >= min) && (max === null || total <= max)) return parseFloat(t.charge || 0);
+  }
+  return parseFloat(defaultCharge || 0);
+}
+
 // --- Global Functions ---
 // Utility for making authenticated fetch requests
 const authenticatedFetch = async (endpoint, options = {}) => {
@@ -151,7 +163,7 @@ const ProductCard = ({ product, onClick }) => (
 );
 
 // --- CHECKOUT COMPONENT ---
-const CheckoutPage = ({ items, total, onPlaceOrder, onBack }) => {
+  const CheckoutPage = ({ items, total, onPlaceOrder, onBack, deliveryCharge }) => {
   const [form, setForm] = useState({ name: '', address: '', upi: '', screenshot: null, mobileNumber: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -204,9 +216,34 @@ const CheckoutPage = ({ items, total, onPlaceOrder, onBack }) => {
             </div>
           ))}
         </div>
-        <div className="border-t pt-3 flex justify-between font-bold text-lg text-blue-900">
-          <span>Total Payable</span>
-          <span>₹{total}</span>
+        <div className="border-t pt-3 flex flex-col gap-2 text-lg text-blue-900">
+          <div className="flex justify-between font-medium">
+            <span>Subtotal</span>
+            <span>₹{total}</span>
+          </div>
+          <div className="flex flex-col">
+            <div className="flex justify-between font-medium">
+              <span>Delivery Charge</span>
+              <span>{parseFloat(deliveryCharge || 0) === 0 ? 'Free' : `₹${parseFloat(deliveryCharge).toFixed(2)}`}</span>
+            </div>
+            {/* Show threshold hint if configured: find the lowest min_amount for free tiers */}
+            {(() => {
+              const tiers = deliveryConfig && Array.isArray(deliveryConfig.tiers) ? deliveryConfig.tiers : [];
+              const zeroTiers = tiers.filter(t => parseFloat(t.charge || 0) === 0);
+              if (zeroTiers.length > 0) {
+                const mins = zeroTiers.map(t => parseFloat(t.min_amount || 0));
+                const threshold = Math.min(...mins);
+                if (!isNaN(threshold) && threshold > 0) {
+                  return <div className="text-sm text-gray-500 mt-1">Order for more than ₹{threshold.toFixed(2)} to avail free delivery</div>;
+                }
+              }
+              return null;
+            })()}
+          </div>
+          <div className="flex justify-between font-bold text-xl">
+            <span>Total Payable</span>
+            <span>₹{(parseFloat(total || 0) + parseFloat(deliveryCharge || 0)).toFixed(2)}</span>
+          </div>
         </div>
       </div>
 
@@ -488,6 +525,8 @@ export default function App() {
   const [view, setView] = useState('home'); // home, product, cart, checkout, success, admin
   const [products, setProducts] = useState([]); 
   const [cart, setCart] = useState([]); // Cart remains local for non-logged-in user session
+  const [deliveryConfig, setDeliveryConfig] = useState({ tiers: [], default_charge: 0 });
+  const [lastDeliveryCharge, setLastDeliveryCharge] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -506,9 +545,23 @@ export default function App() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [productManagementView, setProductManagementView] = useState('list'); // list, add, edit
   const [productToEdit, setProductToEdit] = useState(null);
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [adminDeliveryConfig, setAdminDeliveryConfig] = useState({ tiers: [], default_charge: 0 });
 
 
   // --- API Handlers ---
+
+  const fetchDeliveryConfig = async () => {
+    try {
+      const resp = await fetch(`${API_URL.replace(/\/api\/?$/, '')}/api/delivery`);
+      if (!resp.ok) return;
+      const cfg = await resp.json().catch(() => null);
+      if (cfg) setDeliveryConfig(cfg);
+    } catch (err) {
+      console.warn('Could not fetch delivery config:', err);
+    }
+  };
+
 
   const fetchProducts = async () => {
     try {
@@ -619,12 +672,17 @@ export default function App() {
     };
 
     try {
+      // Compute expected delivery charge locally for display and send
+      const expectedDelivery = computeDeliveryChargeClient(total, deliveryConfig.tiers, deliveryConfig.default_charge);
+      newOrder.deliveryCharge = expectedDelivery;
+
       await authenticatedFetch('orders', {
         method: 'POST',
         body: JSON.stringify(newOrder),
       });
 
       setLastOrderId(newOrderId);
+      setLastDeliveryCharge(expectedDelivery);
       
       if (checkoutSource === 'cart') {
         setCart([]);
@@ -641,6 +699,7 @@ export default function App() {
   useEffect(() => {
     fetchProducts();
     fetchOrders();
+    fetchDeliveryConfig();
     
     // Load local cart state (cart remains local for non-logged-in customers)
     const savedCart = localStorage.getItem('mkn_cart');
@@ -746,6 +805,8 @@ export default function App() {
           setAdminAuthB64(b64);
           setIsAdminLoggedIn(true);
           setAdminLoginError('');
+          // fetch admin delivery config after successful login
+          setTimeout(() => fetchAdminDeliveryConfig(b64), 200);
           setAdminTab('orders');
           fetchOrders();
           return;
@@ -762,6 +823,48 @@ export default function App() {
     setIsAdminLoggedIn(false);
     setView('home');
   }
+
+  // Admin delivery config helpers
+  const fetchAdminDeliveryConfig = async (b64) => {
+    try {
+      const auth = b64 || adminAuthB64;
+      if (!auth) return;
+      const resp = await fetch(`${API_URL.replace(/\/api\/?$/, '')}/api/admin/delivery`, {
+        headers: { Authorization: 'Basic ' + auth }
+      });
+      if (!resp.ok) {
+        console.warn('Failed to fetch admin delivery config');
+        return;
+      }
+      const cfg = await resp.json();
+      setAdminDeliveryConfig(cfg);
+    } catch (err) {
+      console.error('Error fetching admin delivery config', err);
+    }
+  };
+
+  const saveAdminDeliveryConfig = async (cfg) => {
+    try {
+      if (!adminAuthB64) { alert('Please login as admin'); return; }
+      const resp = await fetch(`${API_URL.replace(/\/api\/?$/, '')}/api/admin/delivery`, {
+        method: 'PUT',
+        headers: { Authorization: 'Basic ' + adminAuthB64, 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg)
+      });
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({ error: resp.statusText }));
+        alert('Failed to save delivery config: ' + (e.error || resp.statusText));
+        return;
+      }
+      alert('Delivery configuration saved');
+      setShowDeliveryModal(false);
+      // refresh public config
+      fetchDeliveryConfig();
+    } catch (err) {
+      console.error('Error saving admin delivery config', err);
+      alert('Failed to save delivery config');
+    }
+  };
 
 
   // --- Render Functions ---
@@ -1297,17 +1400,36 @@ export default function App() {
         <h2 className="text-3xl font-bold text-gray-900 mb-2">Order Placed!</h2>
         <p className="text-gray-500 mb-8">Thank you for shopping with MKN Enterprises.</p>
 
-        <div className="bg-gray-50 p-6 rounded-xl border border-dashed border-gray-300 mb-8">
+        <div className="bg-gray-50 p-6 rounded-xl border border-dashed border-gray-300 mb-8 text-left">
           <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">Order ID</p>
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex items-center justify-between gap-3">
             <span className="text-2xl font-mono font-bold text-gray-800">{lastOrderId}</span>
-            <button onClick={copyToClipboard} className="text-blue-600 hover:text-blue-800">
-              <Copy size={20} />
-            </button>
+            <div>
+              <button onClick={copyToClipboard} className="text-blue-600 hover:text-blue-800 mr-3">
+                <Copy size={20} />
+              </button>
+            </div>
           </div>
           {copyStatus === 'copied' && (
              <div className="mt-3 text-sm text-green-600 font-medium">Order ID copied!</div>
           )}
+
+          <div className="mt-4 border-t pt-3 text-sm">
+            <div className="flex justify-between"><span>Delivery Charge</span><span className="font-medium">{parseFloat(lastDeliveryCharge || 0) === 0 ? 'Free' : `₹${parseFloat(lastDeliveryCharge).toFixed(2)}`}</span></div>
+            {(() => {
+              const tiers = deliveryConfig && Array.isArray(deliveryConfig.tiers) ? deliveryConfig.tiers : [];
+              const zeroTiers = tiers.filter(t => parseFloat(t.charge || 0) === 0);
+              if (zeroTiers.length > 0) {
+                const mins = zeroTiers.map(t => parseFloat(t.min_amount || 0));
+                const threshold = Math.min(...mins);
+                if (!isNaN(threshold) && threshold > 0) {
+                  return <div className="text-sm text-gray-500 mt-2">Order for more than ₹{threshold.toFixed(2)} to avail free delivery</div>;
+                }
+              }
+              return null;
+            })()}
+            <div className="flex justify-between mt-2"><span className="font-bold">Total Paid</span><span className="font-bold">₹{ /* show subtotal+delivery if available */ }</span></div>
+          </div>
         </div>
 
         <button 
@@ -1326,7 +1448,10 @@ export default function App() {
       <div className="min-h-screen bg-gray-100 pb-20">
         <header className="bg-gray-800 text-white p-4 flex justify-between items-center shadow">
           <h1 className="text-xl font-bold flex items-center gap-2"><User size={24}/> Admin Panel</h1>
-          <button onClick={handleAdminLogout} className="text-sm bg-gray-700 px-3 py-1 rounded hover:bg-gray-600">Log Out</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setShowDeliveryModal(true); fetchAdminDeliveryConfig(); }} className="text-sm bg-blue-600 px-3 py-1 rounded hover:bg-blue-500">Delivery Settings</button>
+            <button onClick={handleAdminLogout} className="text-sm bg-gray-700 px-3 py-1 rounded hover:bg-gray-600">Log Out</button>
+          </div>
         </header>
 
         <div className="container mx-auto p-4">
@@ -1363,6 +1488,58 @@ export default function App() {
               )}
             </div>
           )}
+        </div>
+        {showDeliveryModal && (
+          <DeliverySettingsModal onClose={() => setShowDeliveryModal(false)} config={adminDeliveryConfig} setConfig={setAdminDeliveryConfig} onSave={() => saveAdminDeliveryConfig(adminDeliveryConfig)} />
+        )}
+      </div>
+    );
+  };
+
+  // Delivery Settings Modal Component
+  const DeliverySettingsModal = ({ onClose, config, setConfig, onSave }) => {
+    const [local, setLocal] = useState(() => ({ tiers: (config && config.tiers) ? config.tiers.map(t => ({ ...t })) : [], default_charge: config && config.default_charge ? config.default_charge : 0 }));
+
+    useEffect(() => {
+      setLocal({ tiers: (config && config.tiers) ? config.tiers.map(t => ({ ...t })) : [], default_charge: config && config.default_charge ? config.default_charge : 0 });
+    }, [config]);
+
+    const addTier = () => setLocal(l => ({ ...l, tiers: [...l.tiers, { min_amount: 0, max_amount: null, charge: 0 }] }));
+    const removeTier = (i) => setLocal(l => ({ ...l, tiers: l.tiers.filter((_, idx) => idx !== i) }));
+    const updateTier = (i, key, value) => setLocal(l => ({ ...l, tiers: l.tiers.map((t, idx) => idx === i ? ({ ...t, [key]: value }) : t) }));
+
+    return (
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold">Delivery Settings</h3>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { if (onSave) { setConfig(local); onSave(); } }} className="bg-green-600 text-white px-3 py-1 rounded">Save</button>
+              <button onClick={onClose} className="bg-gray-200 px-3 py-1 rounded">Close</button>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Default Delivery Charge (used when no tier matches)</label>
+            <input type="number" value={local.default_charge} onChange={e => setLocal(l => ({ ...l, default_charge: parseFloat(e.target.value || 0) }))} className="p-2 border rounded w-48" />
+          </div>
+
+          <div>
+            <h4 className="font-semibold mb-2">Tiers (min_amount, max_amount, charge)</h4>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {local.tiers.map((t, i) => (
+                <div key={i} className="flex gap-2 items-center">
+                  <input type="number" value={t.min_amount} onChange={e => updateTier(i, 'min_amount', e.target.value)} className="p-2 border rounded w-28" />
+                  <input type="number" value={t.max_amount ?? ''} placeholder="(null)" onChange={e => updateTier(i, 'max_amount', e.target.value === '' ? null : e.target.value)} className="p-2 border rounded w-28" />
+                  <input type="number" value={t.charge} onChange={e => updateTier(i, 'charge', e.target.value)} className="p-2 border rounded w-28" />
+                  <button onClick={() => removeTier(i)} className="text-red-600">Remove</button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <button onClick={addTier} className="bg-blue-600 text-white px-3 py-1 rounded">Add Tier</button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1407,6 +1584,7 @@ export default function App() {
           <CheckoutPage
             items={validCheckoutItems}
             total={checkoutTotal}
+            deliveryCharge={computeDeliveryChargeClient(checkoutTotal, deliveryConfig.tiers, deliveryConfig.default_charge)}
             onPlaceOrder={handlePlaceOrder}
             onBack={() => setView(checkoutSource === 'cart' ? 'cart' : 'product')}
           />
