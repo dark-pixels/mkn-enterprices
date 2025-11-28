@@ -364,8 +364,11 @@ app.post('/api/products', async (req, res) => {
             id: result.insertId 
         });
     } catch (error) {
-        console.error("Error adding product:", error);
-        res.status(500).json({ error: "Failed to add product" });
+        // Log full error for server-side debugging
+        console.error("Error adding product:", error && error.stack ? error.stack : error);
+        // Return a more detailed error payload while debugging so the client can show the real cause.
+        // IMPORTANT: Remove or reduce this detail in production to avoid leaking internals.
+        res.status(500).json({ error: "Failed to add product", details: error && error.message ? error.message : String(error) });
     }
 });
 

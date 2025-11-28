@@ -1631,7 +1631,8 @@ export default function App() {
             <span>Contact</span>
           </div>
           {/* Admin panel is accessible at /admin — removed public footer button for security */}
-          <p className="text-[10px] mt-4 opacity-30">© 2024 MKN Enterprises. All rights reserved.</p>
+          <p className="text-[10px] mt-4 opacity-30">© 2024 MKN Enterprises. All rights reserved. <br />
+           Developed by <a href="https://darkpixels.in" target="_blank" rel="noopener noreferrer">DARKPIXELS</a></p>
         </div>
       </footer>
     </div>
