@@ -228,7 +228,7 @@ const ProductCard = ({ product, onClick }) => (
             </div>
             {/* Show threshold hint if configured: find the lowest min_amount for free tiers */}
             {(() => {
-              // If admin provided a note, show it; otherwise, fall back to the computed free-delivery hint
+              // If admin provided  note, show it; otherwise, fall back to the computed free-delivery hint
               if (deliveryConfig && deliveryConfig.note && String(deliveryConfig.note).trim().length > 0) {
                 return <div className="text-sm text-gray-500 mt-1">{deliveryConfig.note}</div>;
               }
@@ -295,7 +295,6 @@ const ProductCard = ({ product, onClick }) => (
           </h4>
           <p className="text-sm text-gray-600 mb-2">Please pay <strong>₹{total}</strong> to the UPI ID below:</p>
           <div className="bg-white p-3 rounded border border-dashed border-blue-300 text-center font-mono text-lg font-bold text-blue-800 mb-4 select-all">
-            fatimanasar71-2@okaxis
             fatimanasar71-2@okaxis
           </div>
 
