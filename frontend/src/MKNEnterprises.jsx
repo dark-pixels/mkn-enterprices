@@ -295,7 +295,7 @@ const ProductCard = ({ product, onClick }) => (
           </h4>
           <p className="text-sm text-gray-600 mb-2">Please pay <strong>₹{total}</strong> to the UPI ID below:</p>
           <div className="bg-white p-3 rounded border border-dashed border-blue-300 text-center font-mono text-lg font-bold text-blue-800 mb-4 select-all">
-            mkn@upi
+            fatimanasar71-2@okaxis
           </div>
 
           <div className="mb-3">
