@@ -122,11 +122,7 @@ const BannerSlider = () => {
           </div>
         </div>
       ))}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-        {BANNERS.map((_, i) => (
-          <div key={i} className={`w-2 h-2 rounded-full ${i === current ? 'bg-orange-500' : 'bg-white/50'}`} />
-        ))}
-      </div>
+      {/* Indicator dots removed as requested */}
     </div>
   );
 };
