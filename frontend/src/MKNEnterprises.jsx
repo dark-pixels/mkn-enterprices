@@ -21,7 +21,7 @@ import {
   Loader2
 } from 'lucide-react';
 
-// Read the backend API URL from Vite env. Set `VITE_API_URL` to e.g. "https://mkn-enterprices-bk.vercel.app/api"
+// Read he ackend API URL from Vite env. Set `VITE_API_URL` to e.g. "https://mkn-enterprices-bk.vercel.app/api"
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 // Client-side helper to compute delivery charge using the same tier logic as the backend
