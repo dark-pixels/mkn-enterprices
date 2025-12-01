@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import logo from './logo.jpg';
+import banner from './banner.jpeg';
 import { 
   ShoppingCart, 
   Search, 
@@ -97,8 +98,7 @@ const Header = ({ cartCount, onCartClick, onHomeClick, onSearch }) => (
 
 const BannerSlider = () => {
   const BANNERS = [
-    "https://images.unsplash.com/photo-1606914501449-5a96b6ce24ca?auto=format&fit=crop&q=80&w=1000",
-    "https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&q=80&w=1000"
+    banner
   ];
   const [current, setCurrent] = useState(0);
 
