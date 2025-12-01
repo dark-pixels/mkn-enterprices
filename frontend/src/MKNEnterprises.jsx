@@ -118,7 +118,7 @@ const BannerSlider = () => {
         >
           <img src={src} alt="Banner" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-6">
-            <h2 className="text-white text-xl md:text-3xl font-bold drop-shadow-lg">Quality Wholesale Products</h2>
+            <h2 className="text-white text-xl md:text-3xl font-bold drop-shadow-lg"></h2>
           </div>
         </div>
       ))}
