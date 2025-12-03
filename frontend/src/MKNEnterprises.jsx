@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import logo from './logo.jpg';
 import banner from './banner.jpeg';
-import b2 from './b2';
+import b2 from './b2.jpg';
 import { 
   ShoppingCart, 
   Search, 
