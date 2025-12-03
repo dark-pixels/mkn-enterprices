@@ -642,27 +642,13 @@ app.delete('/api/orders/:id', requireAdminAuth, async (req, res) => {
 
 // --- Server Startup ---
 
-// Export the `app` so serverless platforms can require it.
-module.exports = app;
+initializeDatabase().then(() => {
+    app.listen(port, () => {
+        console.log(`Express server running at http://localhost:${port}`);
+    });
+});
 
 // Simple admin credential check endpoint (used by frontend login flow)
 app.get('/api/admin/check', requireAdminAuth, (req, res) => {
     res.json({ ok: true });
 });
-
-// Start listening only when this file is executed directly (not when required by serverless wrappers)
-if (require.main === module) {
-    initializeDatabase().then(() => {
-        app.listen(port, () => {
-            console.log(`Express server running at http://localhost:${port}`);
-        });
-    }).catch(err => {
-        console.error('Failed to start server:', err);
-        process.exit(1);
-    });
-} else {
-    // When required (e.g. by a serverless wrapper), still initialize DB connection so handlers work.
-    initializeDatabase().catch(err => {
-        console.error('Failed to initialize database when required as module:', err && err.message ? err.message : err);
-    });
-}
