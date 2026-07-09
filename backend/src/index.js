@@ -15,10 +15,20 @@ const FRONTEND_URLS = (process.env.FRONTEND_URLS || FRONTEND_URL || '').split(',
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001; // The React app will call this port
 
 // Database Configuration: prefer `DATABASE_URL` from `.env` and NEVER hard-code secrets.
-// Set `DATABASE_URL` in `backend/.env`, for example:
-// DATABASE_URL="mysql://user:password@host:port/db?ssl-mode=REQUIRED"
+// If DATABASE_URL is missing or contains the old offline host, fall back to individual variables.
+let dbUri = process.env.DATABASE_URL;
+const isOldHost = dbUri && (dbUri.includes('mkn-mkn.e.aivencloud.com') || dbUri.includes('mkn-mkn.aivencloud.com'));
+if ((!dbUri || isOldHost) && process.env.DB_HOST) {
+    const user = process.env.DB_USER || 'avnadmin';
+    const pass = process.env.DB_PASSWORD || '';
+    const host = process.env.DB_HOST;
+    const port = process.env.DB_PORT || '3306';
+    const name = process.env.DB_NAME || 'defaultdb';
+    dbUri = `mysql://${user}:${pass}@${host}:${port}/${name}?ssl-mode=REQUIRED`;
+}
+
 const dbConfig = {
-    uri: process.env.DATABASE_URL || "mysql://user:password@host:port/defaultdb?ssl-mode=REQUIRED",
+    uri: dbUri || "mysql://user:password@host:port/defaultdb?ssl-mode=REQUIRED",
 };
 
 // Middleware
