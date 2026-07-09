@@ -171,7 +171,7 @@ async function ensureScreenshotColumns() {
     try {
         if (!pool) return;
         // Check which of the columns already exist
-        const [cols] = await pool.query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME IN ('payment_screenshot','payment_screenshot_mime','payment_screenshot_status')");
+        const [cols] = await pool.query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Orders' AND COLUMN_NAME IN ('payment_screenshot','payment_screenshot_mime','payment_screenshot_status','delivery_charge')");
         const existing = new Set(cols.map(r => r.COLUMN_NAME));
         const alters = [];
         if (!existing.has('payment_screenshot')) alters.push('ADD COLUMN payment_screenshot LONGBLOB NULL');
@@ -652,3 +652,5 @@ initializeDatabase().then(() => {
 app.get('/api/admin/check', requireAdminAuth, (req, res) => {
     res.json({ ok: true });
 });
+
+module.exports = app;
