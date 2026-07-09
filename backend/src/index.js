@@ -43,7 +43,7 @@ const corsOptions = {
         // This permits origins like `https://<project>.vercel.app`. Be explicit about allowing the main frontend too.
         try {
             const lower = origin.toLowerCase();
-            if (lower === 'https://mkn-enterprices.vercel.app' || lower.endsWith('.vercel.app')) return callback(null, true);
+            if (lower === 'https://mkn-enterprices.vercel.app' || lower === 'https://mknenterprise.store' || lower === 'https://www.mknenterprise.store' || lower.endsWith('.vercel.app')) return callback(null, true);
         } catch (e) {
             // fallthrough to deny
         }
